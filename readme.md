@@ -177,7 +177,7 @@ int main(void)
 # DLL注入
 
 ## DLL注入简介
-向刚才一样，我们先来简要介绍一下DLL注入。我们知道，在通过`LoadLibrary`函数加载DLL之时，DLL里的`DllMain`函数会被调用。DLL注入就是利用这个原理，让目标进程执行`LoadLibrary`函数加载我们自己编写的DLL，在`DLLMain`里写入自己的代码，从而让目标进程执行我们的代码。需要注意的是，DLL注入多种多样，是一种常见于木马病毒的技术，我用的方式古老而基础，所以程序一编译出来就被杀毒软件祭天了……所以我还是需要退出杀软才能运行我的程序……
+向刚才一样，我们先来简要介绍一下DLL注入。我们知道，在通过`LoadLibrary`函数加载DLL之时，DLL里的`DllMain`函数会被调用。**DLL注入就是利用这个原理，让目标进程执行`LoadLibrary`函数加载我们自己编写的DLL，在`DLLMain`里写入自己的代码，从而让目标进程执行我们的代码**。需要注意的是，DLL注入多种多样，是一种常见于木马病毒的技术，我用的方式古老而基础，所以程序一编译出来就被杀毒软件祭天了……所以我还是需要退出杀软才能运行我的程序……
 
 ## DLL注入实现——准备
 实现DLL注入的第一步自然是先弄一个DLL出来……用VS创建一个DLL工程，引用我们刚才的hook代码。还记得吗？我们的目标是hook `GdiGetCodePage`函数，使其返回932而不是936。这里只要依照上面实现hook MessageBox的程序写一下就好了。
@@ -226,9 +226,9 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 }
 ```
 之后的事情就比较麻烦了：我们要让目标进程执行`LoadLibrary`。而且我们的需求和通常的注入有所不同：我们要在游戏进程启动时就进行注入，否则等到游戏进程启动完毕，乱码的界面就已经绘制出来了……
-这一步的方法多种多样，我会讲解两种方法，一个是通过远程线程注入，这也是最经典的注入方法；另一种是通过shellcode注入，让目标进程先执行一段我们的shellcode来调用`LoadLibrary`。
+这一步的方法多种多样，我会讲解两种方法，一个是通过**远程线程**注入，这也是最经典的注入方法；另一种是通过**shellcode**注入，让目标进程先执行一段我们的shellcode来调用`LoadLibrary`。
 
-那么，接下来就是第二步了：创建挂起的游戏进程。前面说了，我们要在游戏进程启动之时就进行，所以，我们直接用`CreateProcessA`来创建游戏进程，在创建时将进程的启动标志设为`CREATE_SUSPENDED`，这样，游戏进程一经创建就会暂停。待我们成功注入之后，再继续运行程序。和刚才一样，我写了一个类来管理进程的创建……
+那么，接下来就是第二步了：创建挂起的游戏进程。前面说了，我们要在游戏进程启动之时就进行，所以，我们直接用`CreateProcessA`来创建游戏进程，**在创建时将进程的启动标志设为`CREATE_SUSPENDED`，这样，游戏进程一经创建就会暂停**。待我们成功注入之后，再继续运行程序。和刚才一样，我写了一个类来管理进程的创建……
 ```cpp
 //管理子进程的类
 class ChildProcess
@@ -265,7 +265,7 @@ public:
 然后在main函数里加入`ChildProcess process("C:\\GAMES\\madomagi\\madomagi 1.28\\Player.exe", CREATE_SUSPENDED);`
 这样，我们的程序就可以以挂起的方式创建游戏进程了
 
-第三步是提权，因为不是重点，所以这里我直接用了看雪论坛上IamHuskar的代码，详细可以参考MSDN上微软对AdjustTokenPrivileges等相关函数的讲解
+第三步是提权，因为不是重点，所以这里我直接用了看雪论坛上IamHuskar的代码，详细可以参考MSDN上微软对`AdjustTokenPrivileges`等相关函数的讲解
 ```cpp
 BOOL EnableDebugPriv()
 {
@@ -298,7 +298,7 @@ BOOL EnableDebugPriv()
 第四步就是重头戏——将代码注入进程了。
 
 ## DLL注入实现——远程线程注入
-我们先介绍远程线程注入的方法。这个方法原理很简单，WIN32有个API`CreateRemoteThread`，可以在别的进程中创建一个进程，以指定参数执行指定的函数。那么，我们的方法就显而易见了：创建远程线程，执行`LoadLibrary`函数，参数是我们的DLL的路径。
+我们先介绍远程线程注入的方法。这个方法原理很简单，**WIN32有个API`CreateRemoteThread`，可以在别的进程中创建一个进程，以指定参数执行指定的函数**。那么，我们的方法就显而易见了：创建远程线程，执行`LoadLibrary`函数，参数是我们的DLL的路径。
 
 不过，我们需要先在目标进程中用`VirtualAllocEx`先申请一块内存空间，用于存放我们的DLL的路径。大家大概已经猜到了，没错，我写了一个类来管理虚拟内存……构造函数的参数是进程句柄，内存大小和内存的保护标志。我还实现了一个方法`copyFromBuffer`，可以将传入的数组的内容拷贝到申请到的虚拟内存中，为我们后续代码提供便利。
 ```cpp
@@ -374,10 +374,12 @@ void injectWithRemoteThread(PROCESS_INFORMATION& pi, const char *dllPath)
 ```
 
 在main函数里用`injectWithRemoteThread(process.getProcessInformation(), "hook_dll.dll");`调用我们上面写的函数就行了。（还记得吗，`process`是我们上面管理进程的类的对象）。
-这里顺便说一下，远程线程注入是一种通用的注入方式，不要求目标进程处于暂停的状态，大家完全可以用`FindWindowEx`、`GetWindowThreadProcessId`和`OpenProcess`配合拿到指定窗口的进程句柄，然后用`CreateRemoteThread`在它上面创建远程线程注入。我们这里是因为要在游戏开始之前注入，所以让游戏进程暂停。
+
+这里顺便说一下，**远程线程注入是一种通用的注入方式，不要求目标进程处于暂停的状态
+**，大家完全可以用`FindWindowEx`、`GetWindowThreadProcessId`和`OpenProcess`配合拿到指定窗口的进程句柄，然后用`CreateRemoteThread`在它上面创建远程线程注入。我们这里是因为要在游戏开始之前注入，所以让游戏进程暂停。
 
 ## DLL注入实现——shellcode注入
-除了远程线程之外，还有另一种注入方式。因为游戏进程都是由我们的代码创建的，所以我们对其有很大的控制权。我们完全可以在其内存空间中写入一段shellcode机器码来加载DLL，把进程的EIP寄存器直接修改到我们的机器码，这样游戏进程一继续，就会直接执行我们的机器码了。在我们的机器码末尾，再想办法跳回进程原先的EIP寄存器指向的地址，也就是游戏进程的起始点。这个方法相比远程线程要麻烦一些。
+除了远程线程之外，还有另一种注入方式。因为游戏进程都是由我们的代码创建的，所以我们对其有很大的控制权。**我们完全可以在其内存空间中写入一段shellcode机器码来加载DLL，把进程的EIP寄存器直接修改到我们的机器码的地址**，这样游戏进程一继续，就会直接执行我们的机器码了。在我们的机器码末尾，**再想办法跳回进程原先的EIP寄存器指向的地址，也就是游戏进程的起始点**。这个方法相比远程线程要麻烦一些。
 
 大家可能已经猜到了，我写了一个类来生成shellcode……我的机器码一开始先push eip，而末尾是ret指令，这样就可以顺利地回到游戏进程的起始点了。push eip之后，我用pushfd和pushad保存当前所有的寄存器。之后，我把DLL路径的地址压入堆栈，将`LoadLibraryA`的地址放入eax中，然后call eax，这样就可以顺利调用`LoadLibraryA`加载我们的DLL了。由于`LoadLibraryA`的调用方式约定是stdcall（被调用者清理堆栈），所以调用之后栈中的DLL路径就被清理了。最后，我们用popad和popfd恢复所有的寄存器的值，ret回游戏进程起点。
 ```cpp
@@ -418,7 +420,7 @@ public:
 	}
 };
 ```
-有了上面的shellcode类，我们的注入函数的思路也就明确了。跟刚才一样，先申请DLL路径的内存，用游戏进程的EIP和DLL路径的地址生成shellcode。之后申请存放shellcode的虚拟内存，将shellcode拷贝到虚拟内存当中。最后，将游戏进程的EIP改为我们的shellcode虚拟内存的地址，继续主线程就行啦~
+有了上面的shellcode类，我们的注入函数的思路也就明确了。跟刚才一样，**先申请DLL路径的内存，用游戏进程的EIP和DLL路径的地址生成shellcode。之后申请存放shellcode的虚拟内存，将shellcode拷贝到虚拟内存当中。最后，将游戏进程的EIP改为我们的shellcode虚拟内存的地址**，继续主线程就行啦~
 ```cpp
 void injectWithShellCode(PROCESS_INFORMATION& pi, const char* dllPath)
 {
